@@ -3,6 +3,7 @@ const dotenv = require("dotenv");
 const Reddit = require("./model/reddit.js");
 const connectDB = require('/Users/Nishi Ajmera/Downloads/social media analytics/social_media_analytics_backend/database.js');
 const axios = require("axios");
+const { client } = require('/Users/Nishi Ajmera/Downloads/social media analytics/social_media_analytics_backend/redis.js'); 
 const { Client } = require('@elastic/elasticsearch');
 
 dotenv.config();
@@ -12,6 +13,11 @@ app.use(express.json());
 
 // Connect to the database
 connectDB();
+
+// Connect to Redis server
+client.on('connect', () => {
+  console.log('Connected to Redis server');
+});
 
 // Function to get access token for Reddit API
 async function getAccessToken() {
@@ -29,7 +35,6 @@ async function getAccessToken() {
     return response.data.access_token;
   } catch (error) {
     console.error('Error fetching access token:', error.message);
-    throw new Error('Unable to fetch access token');
   }
 }
 
@@ -37,12 +42,21 @@ let accessToken = '';
 // Define route to fetch Reddit posts
 app.get('/reddit/:subreddit', async (req, res) => {
   const { subreddit } = req.params;
-  console.log(subreddit);
+  const cacheKey = `reddit:${subreddit}`;
+  
   if (!accessToken) {
     accessToken = await getAccessToken();
   }
+
   try {
-    const url = `https://oauth.reddit.com/r/Technology/search?q=AI&restrict_sr=on`; 
+    const cachedData = await client.get(cacheKey);
+    console.log('Serving from cache',cachedData);
+    if (cachedData) {
+      console.log('Serving from cache');
+      return res.status(200).json(JSON.parse(cachedData));
+    }
+
+    const url = `https://oauth.reddit.com/r/${subreddit}/search?q=AI&restrict_sr=on`; 
     const response = await axios.get(url, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -62,6 +76,11 @@ app.get('/reddit/:subreddit', async (req, res) => {
         score: postData.score,
         subreddit: postData.subreddit,
       };
+    });
+    
+    // Cache the data in Redis with a TTL (e.g., 600 seconds = 10 minutes)
+    await client.set(cacheKey, JSON.stringify(posts), {
+      EX: 600
     });
 
     // Save posts to MongoDB
@@ -90,19 +109,17 @@ app.listen(PORT, () => {
   console.log(`Server is running successfully on PORT ${PORT}`);
 });
 
-
-const client = new Client({
+const clientElastic = new Client({
   node: 'http://localhost:9200',
   auth: {
-    username: 'elastic',
-    password: 'niral'
+    username: process.env.ELASTIC_USERNAME,
+    password: process.env.ELASTIC_PASSWORD
   }
 });
 
-
 async function testConnection() {
   try {
-    await client.ping();
+    await clientElastic.ping();
     console.log('Elasticsearch connection successful');
   } catch (error) {
     console.error('Elasticsearch connection failed:', error);

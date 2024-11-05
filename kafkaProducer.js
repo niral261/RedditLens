@@ -2,6 +2,7 @@ const { Kafka } = require("kafkajs");
 const axios = require("axios");
 const dotenv = require("dotenv");
 const { accessToken, getAccessToken } = require('./server.js');
+const { client } = require('/Users/Nishi Ajmera/Downloads/social media analytics/social_media_analytics_backend/redis.js');
 
 dotenv.config();
 
@@ -13,6 +14,13 @@ const producer = kafka.producer();
 
 // Function to fetch Reddit posts based on a subreddit and search query
 async function fetchRedditPosts(subreddit, query, accessToken) {
+    const cacheKey = `${subreddit}:${query}`;
+    const cachedData = await client.get(cacheKey);
+    if(cachedData){
+        console.log('Serving from cache');
+        return JSON.parse(cachedData);
+    }
+
     try {
         const { data } = await axios.get(`https://oauth.reddit.com/r/${subreddit}/search?q=${query}}&restrict_sr=on`, {  /*https://oauth.reddit.com/r/${subreddit}/search?q=${query}}&restrict_sr=on */
             headers: { 
@@ -39,11 +47,10 @@ async function produceRedditPosts(subreddit, query, ) {
     let token = accessToken; 
     if (!token) {
         token = await getAccessToken();
-        
     }
 
     try {
-        await producer.connect();
+        await producer.connect(); 
         const posts = await fetchRedditPosts(subreddit, query, token);
         
         if (!posts.length) {
