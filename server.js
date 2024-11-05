@@ -14,11 +14,6 @@ app.use(express.json());
 // Connect to the database
 connectDB();
 
-// Connect to Redis server
-client.on('connect', () => {
-  console.log('Connected to Redis server');
-});
-
 // Function to get access token for Reddit API
 async function getAccessToken() {
   try {
@@ -50,9 +45,8 @@ app.get('/reddit/:subreddit', async (req, res) => {
 
   try {
     const cachedData = await client.get(cacheKey);
-    console.log('Serving from cache',cachedData);
     if (cachedData) {
-      console.log('Serving from cache');
+      // console.log('Serving from cache');
       return res.status(200).json(JSON.parse(cachedData));
     }
 

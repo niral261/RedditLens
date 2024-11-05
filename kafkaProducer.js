@@ -11,18 +11,24 @@ const kafka = new Kafka({
     brokers: [process.env.KAFKA_BROKER]
 });
 const producer = kafka.producer();
+(async() => {
+    await producer.connect();
+})();
 
 // Function to fetch Reddit posts based on a subreddit and search query
 async function fetchRedditPosts(subreddit, query, accessToken) {
     const cacheKey = `${subreddit}:${query}`;
+    console.time('Cache Access Time');
     const cachedData = await client.get(cacheKey);
     if(cachedData){
-        console.log('Serving from cache');
+        console.timeEnd('Cache Access Time');
+        console.log('Serving from cache from fetchRedditPosts');
         return JSON.parse(cachedData);
     }
 
+    console.time('Reddit API Fetch Time');
     try {
-        const { data } = await axios.get(`https://oauth.reddit.com/r/${subreddit}/search?q=${query}}&restrict_sr=on`, {  /*https://oauth.reddit.com/r/${subreddit}/search?q=${query}}&restrict_sr=on */
+        const { data } = await axios.get(`https://oauth.reddit.com/r/${subreddit}/search?q=${query}&restrict_sr=on`, {  /*https://oauth.reddit.com/r/${subreddit}/search?q=${query}}&restrict_sr=on */
             headers: { 
                 'Authorization': `Bearer ${accessToken}`,
                 'User-Agent': process.env.REDDIT_USER_AGENT 
@@ -34,8 +40,15 @@ async function fetchRedditPosts(subreddit, query, accessToken) {
                 restrict_sr: true,
             }
         });
-        
-        return data.data.children.map(post => post.data); 
+
+        const posts = data.data.children.map(post => post.data);
+
+        // Store the data in Redis cache
+        await client.set(cacheKey, JSON.stringify(posts), 'EX', 3600);  // Cache for 1 hour
+
+        console.timeEnd('Reddit API Fetch Time');
+        console.log("Fetched from Reddit API");
+        return posts; 
     } catch (error) {
         console.error("Error fetching Reddit posts:", error.response ? error.response.data : error.message);
         return [];
@@ -43,16 +56,14 @@ async function fetchRedditPosts(subreddit, query, accessToken) {
 }
 
 // Function to send Reddit posts to Kafka
-async function produceRedditPosts(subreddit, query, ) {
+async function produceRedditPosts(subreddit, query) {
     let token = accessToken; 
     if (!token) {
         token = await getAccessToken();
     }
 
     try {
-        await producer.connect(); 
         const posts = await fetchRedditPosts(subreddit, query, token);
-        
         if (!posts.length) {
             console.log("No posts fetched. Check if the subreddit and query are correct.");
         } else {
@@ -65,10 +76,10 @@ async function produceRedditPosts(subreddit, query, ) {
             console.log(`Successfully produced ${posts.length} Reddit posts to Kafka topic`);
         }
     } catch (error) {
-        console.error("Error producing Reddit posts:", error.message);
+        console.error("Error producing Reddit posts:", error);
     } finally {
         await producer.disconnect();
     }
 }
 
-produceRedditPosts('Technology', 'AI').catch(console.error);
+produceRedditPosts('chatgpt', 'ai').catch(console.error);

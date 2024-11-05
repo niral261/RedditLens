@@ -42,7 +42,6 @@ const run = async () => {
         body: redditPost,
       });
 
-      console.log(`Produced: ${redditPost.title}`);
     },
   });
 };
